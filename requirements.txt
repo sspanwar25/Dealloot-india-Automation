@@ -1,2 +1,0 @@
-telethon==1.30.3
-flask==2.3.3
