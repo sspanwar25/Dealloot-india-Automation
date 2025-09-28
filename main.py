@@ -34,6 +34,11 @@ SOURCE_CHANNELS = [x.strip() for x in required_vars["SOURCE_CHANNEL_USERNAME"].s
 TARGET_CHAT_IDS = [x.strip() for x in required_vars["TARGET_CHAT_ID"].split(",")]
 SESSION_BASE64 = required_vars["SESSION_BASE64"]
 
+# Debug print for startup check
+
+logger.info(f"🔍 Loaded SOURCE_CHANNELS: {SOURCE_CHANNELS}")
+logger.info(f"🔍 Loaded TARGET_CHAT_IDS: {TARGET_CHAT_IDS}")
+
 # ------------------ Session Handling ------------------
 
 session_file = "final_session.session"
