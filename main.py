@@ -12,7 +12,7 @@ logging.basicConfig(
 format="%(asctime)s - %(levelname)s - %(message)s",
 level=logging.INFO
 )
-logger = logging.getLogger(**name**)
+logger = logging.getLogger(__name__)
 
 # ------------------ Environment Variables ------------------
 
@@ -205,3 +205,4 @@ from threading import Thread
 Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))).start()
 # Start Telegram client
 asyncio.run(main())
+
