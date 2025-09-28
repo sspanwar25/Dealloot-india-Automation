@@ -2,10 +2,10 @@ import os
 import logging
 import asyncio
 from telethon import TelegramClient, events
-from telethon.errors import FloodWaitError
 from telethon.tl.types import MessageMediaWebPage
 import re
 from flask import Flask
+from threading import Thread
 
 # ------------------ Logging ------------------
 logging.basicConfig(
@@ -17,19 +17,13 @@ logger = logging.getLogger(__name__)
 # ------------------ Environment Variables ------------------
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
-PHONE = os.getenv("PHONE_NUMBER")  # Optional if using bot token
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Optional
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Use bot token for Render headless
 PRIVATE_GROUP_ID = int(os.getenv("PRIVATE_GROUP_ID"))
 EARNKARO_BOT_USERNAME = os.getenv("EARNKARO_BOT_USERNAME")
 PERSONAL_BOT_USERNAME = os.getenv("PERSONAL_BOT_USERNAME")
 SOURCE_CHANNEL_USERNAME = os.getenv("SOURCE_CHANNEL_USERNAME")
 
-required_vars = [
-    API_ID, API_HASH,
-    PRIVATE_GROUP_ID,
-    EARNKARO_BOT_USERNAME, PERSONAL_BOT_USERNAME, SOURCE_CHANNEL_USERNAME
-]
-
+required_vars = [API_ID, API_HASH, BOT_TOKEN, PRIVATE_GROUP_ID, EARNKARO_BOT_USERNAME, PERSONAL_BOT_USERNAME, SOURCE_CHANNEL_USERNAME]
 if not all(required_vars):
     logger.error("❌ Required environment variables not set")
     exit(1)
@@ -68,13 +62,9 @@ CATEGORY_TEMPLATES = {
 }
 
 # ------------------ Telegram Client ------------------
-if BOT_TOKEN:
-    client = TelegramClient("final_session", API_ID, API_HASH).start(bot_token=BOT_TOKEN)
-else:
-    client = TelegramClient("final_session", API_ID, API_HASH, phone=PHONE)
-
+client = TelegramClient("bot_session", API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 processed_messages = set()
-forwarding_enabled = True
+MAX_CAPTION = 1024
 
 # ------------------ Helper Functions ------------------
 def detect_platform(text):
@@ -117,8 +107,6 @@ def format_template(platform, category, message_text):
     header = "\n".join([first_line] + intro_lines)
     template_parts = [header, message_text, follow_line, TEMPLATES[platform]["hashtags"] if platform in TEMPLATES else "#DealLootIndia #LootDeal"]
     return "\n\n".join(template_parts)
-
-MAX_CAPTION = 1024
 
 # ------------------ Send Functions ------------------
 async def send_to_earnkaro(message_text, media=None):
@@ -193,13 +181,9 @@ def home():
     return "Bot is running."
 
 async def main():
-    await client.start()  # session file से auto-login होगा
     logger.info("✅ Telegram client started")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
-    # Start Flask server in background
-    from threading import Thread
     Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))).start()
-    # Start Telegram client
     asyncio.run(main())
