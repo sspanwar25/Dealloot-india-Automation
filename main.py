@@ -103,7 +103,7 @@ def extract_links(event_message):
     return urls
 
 def format_template(platform, category, message_text):
-    follow_line = "👉 Follow @DealLoot_India for 🔥 daily loot deals!"
+    follow_line = "👉 Follow @Deallootindia_offical for 🔥 daily loot deals!"
     if category and category in CATEGORY_TEMPLATES:
         first_line = f"{CATEGORY_TEMPLATES[category]['emoji']} {platform.capitalize()} {category.capitalize()} Deal"
     else:
@@ -191,3 +191,4 @@ if __name__ == "__main__":
     from threading import Thread
     Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))).start()
     asyncio.run(main())
+
