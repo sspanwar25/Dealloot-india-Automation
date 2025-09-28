@@ -17,16 +17,19 @@ logger = logging.getLogger(__name__)
 # ------------------ Environment Variables ------------------
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
-PHONE = os.getenv("PHONE_NUMBER")
+PHONE = os.getenv("PHONE_NUMBER")  # Optional if using bot token
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Optional
 PRIVATE_GROUP_ID = int(os.getenv("PRIVATE_GROUP_ID"))
 EARNKARO_BOT_USERNAME = os.getenv("EARNKARO_BOT_USERNAME")
 PERSONAL_BOT_USERNAME = os.getenv("PERSONAL_BOT_USERNAME")
 SOURCE_CHANNEL_USERNAME = os.getenv("SOURCE_CHANNEL_USERNAME")
 
 required_vars = [
-    API_ID, API_HASH, PHONE, PRIVATE_GROUP_ID,
+    API_ID, API_HASH,
+    PRIVATE_GROUP_ID,
     EARNKARO_BOT_USERNAME, PERSONAL_BOT_USERNAME, SOURCE_CHANNEL_USERNAME
 ]
+
 if not all(required_vars):
     logger.error("❌ Required environment variables not set")
     exit(1)
@@ -65,7 +68,11 @@ CATEGORY_TEMPLATES = {
 }
 
 # ------------------ Telegram Client ------------------
-client = TelegramClient("final_session", API_ID, API_HASH)
+if BOT_TOKEN:
+    client = TelegramClient("final_session", API_ID, API_HASH).start(bot_token=BOT_TOKEN)
+else:
+    client = TelegramClient("final_session", API_ID, API_HASH, phone=PHONE)
+
 processed_messages = set()
 forwarding_enabled = True
 
@@ -101,7 +108,7 @@ def extract_links(event_message):
     return urls
 
 def format_template(platform, category, message_text):
-    follow_line = "👉 Follow @DealLoot_India for 🔥 daily loot deals!"  # ✅ Updated username
+    follow_line = "👉 Follow @DealLoot_India for 🔥 daily loot deals!"
     if category and category in CATEGORY_TEMPLATES:
         first_line = f"{CATEGORY_TEMPLATES[category]['emoji']} {platform.capitalize()} {category.capitalize()} Deal"
     else:
@@ -191,6 +198,8 @@ async def main():
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
+    # Start Flask server in background
     from threading import Thread
     Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))).start()
+    # Start Telegram client
     asyncio.run(main())
