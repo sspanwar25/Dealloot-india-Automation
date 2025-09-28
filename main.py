@@ -29,8 +29,8 @@ BOT_TOKEN, API_ID, API_HASH, PRIVATE_GROUP_ID,
 EARNKARO_BOT_USERNAME, PERSONAL_BOT_USERNAME, SOURCE_CHANNEL_USERNAME
 ]
 if not all(required_vars):
-logger.error("❌ Required environment variables not set")
-exit(1)
+    logger.error("❌ Required environment variables not set")
+    exit(1)
 
 # ------------------ Templates ------------------
 
@@ -205,4 +205,5 @@ from threading import Thread
 Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))).start()
 # Start Telegram client
 asyncio.run(main())
+
 
