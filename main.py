@@ -21,6 +21,7 @@ PHONE = os.getenv("PHONE_NUMBER")
 SOURCE_CHANNELS = [x.strip() for x in os.getenv("SOURCE_CHANNEL_USERNAME").split(",")]
 TARGET_CHAT_IDS = [x.strip() for x in os.getenv("TARGET_CHAT_ID").split(",")]
 SESSION_BASE64 = os.getenv("SESSION_BASE64")
+PERSONAL_BOT_USERNAME = os.getenv("PERSONAL_BOT_USERNAME")  # Manual forward source
 
 required_vars = [API_ID, API_HASH, PHONE, SOURCE_CHANNELS, TARGET_CHAT_IDS]
 if not all(required_vars):
@@ -152,27 +153,31 @@ async def handle_source(event):
 
     await send_to_targets(final_text, media)
 
-@client.on(events.NewMessage(chats=SOURCE_CHANNELS))
-async def handle_manual(event):
-    msg_key = (event.message.chat_id, event.message.id)
-    if msg_key in processed_messages:
-        return
-    processed_messages.add(msg_key)
+# ------------------ Manual Forward Handler ------------------
+if PERSONAL_BOT_USERNAME:
+    @client.on(events.NewMessage(chats=PERSONAL_BOT_USERNAME))
+    async def handle_manual_personal(event):
+        msg_key = (event.message.chat_id, event.message.id)
+        if msg_key in processed_messages:
+            return
+        processed_messages.add(msg_key)
 
-    message_text = event.message.message or ""
-    links = extract_links(event.message)
-    if links:
-        message_text += "\n" + "\n".join(links)
+        message_text = event.message.message or ""
+        links = extract_links(event.message)
+        if links:
+            message_text += "\n" + "\n".join(links)
 
-    media = event.message.media
-    if isinstance(media, MessageMediaWebPage):
-        media = None
+        media = event.message.media
+        if isinstance(media, MessageMediaWebPage):
+            media = None
 
-    platform = detect_platform(message_text)
-    category = detect_category(message_text)
-    final_text = format_template(platform, category, message_text)
+        platform = detect_platform(message_text)
+        category = detect_category(message_text)
+        final_text = format_template(platform, category, message_text)
 
-    await send_to_targets(final_text, media)
+        await send_to_targets(final_text, media)
+        await event.reply("✅ Sent manually to target chats")
+        logger.info(f"Manual message forwarded from {PERSONAL_BOT_USERNAME}")
 
 # ------------------ Keep Alive Flask Server ------------------
 app = Flask("")
