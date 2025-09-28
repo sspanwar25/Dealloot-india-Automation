@@ -15,22 +15,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ------------------ Environment Variables ------------------
-API_ID = os.getenv("API_ID")
+API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
-PRIVATE_GROUP_ID = os.getenv("PRIVATE_GROUP_ID")
-EARNKARO_BOT_USERNAME = os.getenv("EARNKARO_BOT_USERNAME")
-PERSONAL_BOT_USERNAME = os.getenv("PERSONAL_BOT_USERNAME")
-SOURCE_CHANNEL_USERNAME = os.getenv("SOURCE_CHANNEL_USERNAME")
+PHONE = os.getenv("PHONE_NUMBER")
+SOURCE_CHANNELS = [x.strip() for x in os.getenv("SOURCE_CHANNEL_USERNAME").split(",")]
+TARGET_CHAT_IDS = [x.strip() for x in os.getenv("TARGET_CHAT_ID").split(",")]
 SESSION_BASE64 = os.getenv("SESSION_BASE64")
 
-# Validate required variables
-required_vars = [API_ID, API_HASH, PRIVATE_GROUP_ID, EARNKARO_BOT_USERNAME, PERSONAL_BOT_USERNAME, SOURCE_CHANNEL_USERNAME]
+required_vars = [API_ID, API_HASH, PHONE, SOURCE_CHANNELS, TARGET_CHAT_IDS]
 if not all(required_vars):
     logger.error("❌ Required environment variables not set")
     exit(1)
-
-API_ID = int(API_ID)
-PRIVATE_GROUP_ID = int(PRIVATE_GROUP_ID)
 
 # ------------------ Session File ------------------
 if SESSION_BASE64:
@@ -71,11 +66,10 @@ CATEGORY_TEMPLATES = {
     "beauty": {"emoji": "💄", "intro": ["⚡ Beauty & personal care deals!", "🚀 Pamper yourself with best offers!"]}
 }
 
-MAX_CAPTION = 1024
-processed_messages = set()
-
 # ------------------ Telegram Client ------------------
 client = TelegramClient("final_session", API_ID, API_HASH)
+processed_messages = set()
+MAX_CAPTION = 1024
 
 # ------------------ Helper Functions ------------------
 def detect_platform(text):
@@ -120,22 +114,23 @@ def format_template(platform, category, message_text):
     return "\n\n".join(template_parts)
 
 # ------------------ Send Functions ------------------
-async def send_to_earnkaro(message_text, media=None):
-    try:
-        if media:
-            caption_text = message_text[:MAX_CAPTION]
-            await client.send_file(EARNKARO_BOT_USERNAME, file=media, caption=caption_text)
-            remaining_text = message_text[MAX_CAPTION:]
-            if remaining_text.strip():
-                await client.send_message(EARNKARO_BOT_USERNAME, remaining_text)
-        else:
-            await client.send_message(EARNKARO_BOT_USERNAME, message_text)
-        logger.info("✅ Sent to EarnKaro bot")
-    except Exception as e:
-        logger.error(f"❌ Failed sending to EarnKaro bot: {e}")
+async def send_to_targets(message_text, media=None):
+    for target in TARGET_CHAT_IDS:
+        try:
+            if media:
+                caption_text = message_text[:MAX_CAPTION]
+                await client.send_file(target, file=media, caption=caption_text)
+                remaining_text = message_text[MAX_CAPTION:]
+                if remaining_text.strip():
+                    await client.send_message(target, remaining_text)
+            else:
+                await client.send_message(target, message_text)
+            logger.info(f"✅ Sent to {target}")
+        except Exception as e:
+            logger.error(f"❌ Failed sending to {target}: {e}")
 
 # ------------------ Event Handlers ------------------
-@client.on(events.NewMessage(chats=SOURCE_CHANNEL_USERNAME))
+@client.on(events.NewMessage(chats=SOURCE_CHANNELS))
 async def handle_source(event):
     msg_key = (event.message.chat_id, event.message.id)
     if msg_key in processed_messages:
@@ -155,34 +150,29 @@ async def handle_source(event):
     category = detect_category(message_text)
     final_text = format_template(platform, category, message_text)
 
-    try:
-        await client.send_message(PRIVATE_GROUP_ID, final_text)
-        await send_to_earnkaro(final_text, media)
-    except Exception as e:
-        logger.error(f"❌ Auto forward failed: {e}")
+    await send_to_targets(final_text, media)
 
-@client.on(events.NewMessage(chats=PERSONAL_BOT_USERNAME))
+@client.on(events.NewMessage(chats=SOURCE_CHANNELS))
 async def handle_manual(event):
-    try:
-        message_text = event.message.message or ""
-        links = extract_links(event.message)
-        if links:
-            message_text += "\n" + "\n".join(links)
+    msg_key = (event.message.chat_id, event.message.id)
+    if msg_key in processed_messages:
+        return
+    processed_messages.add(msg_key)
 
-        media = event.message.media
-        if isinstance(media, MessageMediaWebPage):
-            media = None
+    message_text = event.message.message or ""
+    links = extract_links(event.message)
+    if links:
+        message_text += "\n" + "\n".join(links)
 
-        platform = detect_platform(message_text)
-        category = detect_category(message_text)
-        final_text = format_template(platform, category, message_text)
+    media = event.message.media
+    if isinstance(media, MessageMediaWebPage):
+        media = None
 
-        await send_to_earnkaro(final_text, media)
-        await event.reply("✅ Sent manually to EarnKaro bot")
-        logger.info(f"Manual message forwarded: Platform={platform}, Category={category}")
+    platform = detect_platform(message_text)
+    category = detect_category(message_text)
+    final_text = format_template(platform, category, message_text)
 
-    except Exception as e:
-        logger.error(f"❌ Manual Send Error: {e}")
+    await send_to_targets(final_text, media)
 
 # ------------------ Keep Alive Flask Server ------------------
 app = Flask("")
@@ -193,7 +183,7 @@ def home():
 
 # ------------------ Main ------------------
 async def main():
-    await client.start()  # Auto-login using session file
+    await client.start()
     logger.info("✅ Telegram client started")
     await client.run_until_disconnected()
 
