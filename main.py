@@ -15,16 +15,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ------------------ Environment Variables ------------------
-API_ID = int(os.getenv("API_ID", "0"))
+API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 PHONE = os.getenv("PHONE_NUMBER")
-SOURCE_CHANNELS = [x.strip() for x in os.getenv("SOURCE_CHANNEL_USERNAME", "").split(",") if x.strip()]
-TARGET_CHAT_IDS = [x.strip() for x in os.getenv("TARGET_CHAT_ID", "").split(",") if x.strip()]
+SOURCE_CHANNELS = [x.strip() for x in os.getenv("SOURCE_CHANNEL_USERNAME").split(",")]
+TARGET_CHAT_IDS = [x.strip() for x in os.getenv("TARGET_CHAT_ID").split(",")]
 SESSION_BASE64 = os.getenv("SESSION_BASE64")
 
-required_vars = [API_ID, API_HASH, SOURCE_CHANNELS, TARGET_CHAT_IDS]
+required_vars = [API_ID, API_HASH, PHONE, SOURCE_CHANNELS, TARGET_CHAT_IDS]
 if not all(required_vars):
-    logger.error("❌ Required environment variables not set properly.")
+    logger.error("❌ Required environment variables not set")
     exit(1)
 
 # ------------------ Session File ------------------
@@ -110,8 +110,8 @@ def format_template(platform, category, message_text):
         first_line = f"{TEMPLATES[platform]['emoji']} {platform.capitalize()} Loot Deal" if platform in TEMPLATES else f"{platform.capitalize() if platform else ''} Loot Deal"
     intro_lines = TEMPLATES[platform]["intro"].split("\n") if platform in TEMPLATES else []
     header = "\n".join([first_line] + intro_lines)
-    hashtags = TEMPLATES[platform]["hashtags"] if platform in TEMPLATES else "#DealLootIndia #LootDeal"
-    return "\n\n".join([header, message_text, follow_line, hashtags])
+    template_parts = [header, message_text, follow_line, TEMPLATES[platform]["hashtags"] if platform in TEMPLATES else "#DealLootIndia #LootDeal"]
+    return "\n\n".join(template_parts)
 
 # ------------------ Send Functions ------------------
 async def send_to_targets(message_text, media=None):
@@ -129,9 +129,31 @@ async def send_to_targets(message_text, media=None):
         except Exception as e:
             logger.error(f"❌ Failed sending to {target}: {e}")
 
-# ------------------ Event Handler ------------------
+# ------------------ Event Handlers ------------------
 @client.on(events.NewMessage(chats=SOURCE_CHANNELS))
-async def handle_messages(event):
+async def handle_source(event):
+    msg_key = (event.message.chat_id, event.message.id)
+    if msg_key in processed_messages:
+        return
+    processed_messages.add(msg_key)
+
+    message_text = event.message.message or ""
+    links = extract_links(event.message)
+    if links:
+        message_text += "\n" + "\n".join(links)
+
+    media = event.message.media
+    if isinstance(media, MessageMediaWebPage):
+        media = None
+
+    platform = detect_platform(message_text)
+    category = detect_category(message_text)
+    final_text = format_template(platform, category, message_text)
+
+    await send_to_targets(final_text, media)
+
+@client.on(events.NewMessage(chats=SOURCE_CHANNELS))
+async def handle_manual(event):
     msg_key = (event.message.chat_id, event.message.id)
     if msg_key in processed_messages:
         return
@@ -162,7 +184,7 @@ def home():
 # ------------------ Main ------------------
 async def main():
     await client.start()
-    logger.info(f"✅ Telegram client started, monitoring: {SOURCE_CHANNELS}")
+    logger.info("✅ Telegram client started")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
