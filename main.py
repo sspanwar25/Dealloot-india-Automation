@@ -3,10 +3,9 @@ import logging
 import asyncio
 import base64
 import re
-from threading import Thread
-from flask import Flask, request, jsonify
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageMediaWebPage
+from flask import Flask
 
 # ------------------ Logging ------------------
 logging.basicConfig(
@@ -24,24 +23,20 @@ PERSONAL_BOT_USERNAME = os.getenv("PERSONAL_BOT_USERNAME")
 SOURCE_CHANNEL_USERNAME = os.getenv("SOURCE_CHANNEL_USERNAME")
 SESSION_BASE64 = os.getenv("SESSION_BASE64")
 
-MULTI_SOURCE_CHANNELS = os.getenv("MULTI_SOURCE_CHANNELS", "")
-MULTI_TARGETS = os.getenv("MULTI_TARGETS", "")
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
-
-if not API_ID or not API_HASH:
-    logger.error("❌ API_ID or API_HASH missing")
+# Validate required variables
+required_vars = [API_ID, API_HASH, PRIVATE_GROUP_ID, EARNKARO_BOT_USERNAME, PERSONAL_BOT_USERNAME, SOURCE_CHANNEL_USERNAME]
+if not all(required_vars):
+    logger.error("❌ Required environment variables not set")
     exit(1)
 
-try:
-    API_ID = int(API_ID)
-except Exception:
-    logger.error("❌ API_ID must be integer")
-    exit(1)
+API_ID = int(API_ID)
+PRIVATE_GROUP_ID = int(PRIVATE_GROUP_ID)
 
+# ------------------ Session File ------------------
 if SESSION_BASE64:
     with open("final_session.session", "wb") as f:
         f.write(base64.b64decode(SESSION_BASE64))
-    logger.info("✅ final_session.session created from SESSION_BASE64")
+    logger.info("✅ final_session.session file created from SESSION_BASE64")
 
 # ------------------ Templates ------------------
 TEMPLATES = {
@@ -82,32 +77,11 @@ processed_messages = set()
 # ------------------ Telegram Client ------------------
 client = TelegramClient("final_session", API_ID, API_HASH)
 
-# ------------------ Sets ------------------
-SOURCE_IDENTIFIERS = set()
-SOURCE_IDS = set()
-TARGET_IDENTIFIERS = set()
-TARGET_IDS = set()
-PERSONAL_BOT_ID = None
-
-def parse_list_env(s):
-    return [x.strip() for x in s.split(",") if x.strip()]
-
-if SOURCE_CHANNEL_USERNAME:
-    SOURCE_IDENTIFIERS.update(parse_list_env(SOURCE_CHANNEL_USERNAME))
-if MULTI_SOURCE_CHANNELS:
-    SOURCE_IDENTIFIERS.update(parse_list_env(MULTI_SOURCE_CHANNELS))
-if PRIVATE_GROUP_ID:
-    TARGET_IDENTIFIERS.add(str(PRIVATE_GROUP_ID))
-if EARNKARO_BOT_USERNAME:
-    TARGET_IDENTIFIERS.add(EARNKARO_BOT_USERNAME)
-if MULTI_TARGETS:
-    TARGET_IDENTIFIERS.update(parse_list_env(MULTI_TARGETS))
-
 # ------------------ Helper Functions ------------------
 def detect_platform(text):
     if not text:
         return None
-    text_lower = text.lower().replace(" ", "").replace("@", "")
+    text_lower = text.lower().replace(" ", "")
     for platform, keywords in PLATFORM_KEYWORDS.items():
         for kw in keywords:
             if kw in text_lower:
@@ -118,90 +92,112 @@ def detect_platform(text):
     return None
 
 def detect_category(text):
-    if not text:
-        return None
     text_lower = text.lower()
     for category, keywords in CATEGORY_KEYWORDS.items():
         if any(k in text_lower for k in keywords):
             return category
     return None
 
-def format_template(platform, category, message_text):
-    follow_line = "👉 Follow @Deallootindia_offical for 🔥 daily loot deals!"
-    first_line = f"{TEMPLATES.get(platform, {'emoji':'🔖'})['emoji']} {platform.capitalize() if platform else ''} Loot Deal"
-    intro_lines = TEMPLATES.get(platform, {}).get("intro", "").split("\n")
-    header = "\n".join([first_line] + intro_lines)
-    hashtags = TEMPLATES.get(platform, {}).get("hashtags", "#DealLootIndia #LootDeal")
-    return "\n\n".join([header, message_text, follow_line, hashtags])
+def extract_links(event_message):
+    urls = []
+    if event_message.message:
+        urls.extend(re.findall(r'https?://\S+', event_message.message))
+    if hasattr(event_message, "entities") and event_message.entities:
+        for entity in event_message.entities:
+            if hasattr(entity, "url") and entity.url:
+                urls.append(entity.url)
+    return urls
 
-# ------------------ Sending ------------------
-async def send_to_single(target, message_text, media=None):
+def format_template(platform, category, message_text):
+    follow_line = "👉 Follow @DealLoot_India for 🔥 daily loot deals!"
+    if category and category in CATEGORY_TEMPLATES:
+        first_line = f"{CATEGORY_TEMPLATES[category]['emoji']} {platform.capitalize()} {category.capitalize()} Deal"
+    else:
+        first_line = f"{TEMPLATES[platform]['emoji']} {platform.capitalize()} Loot Deal" if platform in TEMPLATES else f"{platform.capitalize() if platform else ''} Loot Deal"
+    intro_lines = TEMPLATES[platform]["intro"].split("\n") if platform in TEMPLATES else []
+    header = "\n".join([first_line] + intro_lines)
+    template_parts = [header, message_text, follow_line, TEMPLATES[platform]["hashtags"] if platform in TEMPLATES else "#DealLootIndia #LootDeal"]
+    return "\n\n".join(template_parts)
+
+# ------------------ Send Functions ------------------
+async def send_to_earnkaro(message_text, media=None):
     try:
         if media:
-            caption = message_text[:MAX_CAPTION]
-            await client.send_file(target, file=media, caption=caption)
-            remaining = message_text[MAX_CAPTION:].strip()
-            if remaining:
-                for i in range(0, len(remaining), 4000):
-                    await client.send_message(target, remaining[i:i+4000])
+            caption_text = message_text[:MAX_CAPTION]
+            await client.send_file(EARNKARO_BOT_USERNAME, file=media, caption=caption_text)
+            remaining_text = message_text[MAX_CAPTION:]
+            if remaining_text.strip():
+                await client.send_message(EARNKARO_BOT_USERNAME, remaining_text)
         else:
-            for i in range(0, len(message_text), 4000):
-                await client.send_message(target, message_text[i:i+4000])
-        logger.info(f"✅ Sent to {target}")
+            await client.send_message(EARNKARO_BOT_USERNAME, message_text)
+        logger.info("✅ Sent to EarnKaro bot")
     except Exception as e:
-        logger.error(f"❌ Failed sending to {target}: {e}")
+        logger.error(f"❌ Failed sending to EarnKaro bot: {e}")
 
-async def send_to_targets(message_text, media=None):
-    for tid in list(TARGET_IDS):
-        await send_to_single(tid, message_text, media)
-    for ident in list(TARGET_IDENTIFIERS):
-        rid = await resolve_identifier_to_id(ident)
-        if rid and rid in TARGET_IDS:
-            continue
-        await send_to_single(ident, message_text, media)
-
-async def resolve_identifier_to_id(identifier):
-    if not identifier:
-        return None
-    try:
-        if re.match(r"^-?\d+$", identifier):
-            return int(identifier)
-    except:
-        pass
-    try:
-        ent = await client.get_entity(identifier)
-        return int(ent.id)
-    except Exception as e:
-        logger.warning(f"Could not resolve {identifier} to id: {e}")
-        return None
-
-async def resolve_all_initial():
-    global PERSONAL_BOT_ID
-    for ident in list(SOURCE_IDENTIFIERS):
-        rid = await resolve_identifier_to_id(ident)
-        if rid:
-            SOURCE_IDS.add(rid)
-    for ident in list(TARGET_IDENTIFIERS):
-        rid = await resolve_identifier_to_id(ident)
-        if rid:
-            TARGET_IDS.add(rid)
-    if PERSONAL_BOT_USERNAME:
-        pbid = await resolve_identifier_to_id(PERSONAL_BOT_USERNAME)
-        if pbid:
-            PERSONAL_BOT_ID = pbid
-    logger.info(f"Resolved source ids: {SOURCE_IDS}")
-    logger.info(f"Resolved target ids: {TARGET_IDS}")
-    if PERSONAL_BOT_ID:
-        logger.info(f"Resolved personal bot id: {PERSONAL_BOT_ID}")
-
-# ------------------ Message Handler ------------------
-@client.on(events.NewMessage())
-async def global_message_handler(event):
-    if not getattr(event, "message", None):
-        return
-    chat_id = getattr(event.message, "chat_id", None) or getattr(event, "chat_id", None)
-    msg_key = (chat_id, getattr(event.message, "id", None))
+# ------------------ Event Handlers ------------------
+@client.on(events.NewMessage(chats=SOURCE_CHANNEL_USERNAME))
+async def handle_source(event):
+    msg_key = (event.message.chat_id, event.message.id)
     if msg_key in processed_messages:
         return
+    processed_messages.add(msg_key)
 
-    message_text = event
+    message_text = event.message.message or ""
+    links = extract_links(event.message)
+    if links:
+        message_text += "\n" + "\n".join(links)
+
+    media = event.message.media
+    if isinstance(media, MessageMediaWebPage):
+        media = None
+
+    platform = detect_platform(message_text)
+    category = detect_category(message_text)
+    final_text = format_template(platform, category, message_text)
+
+    try:
+        await client.send_message(PRIVATE_GROUP_ID, final_text)
+        await send_to_earnkaro(final_text, media)
+    except Exception as e:
+        logger.error(f"❌ Auto forward failed: {e}")
+
+@client.on(events.NewMessage(chats=PERSONAL_BOT_USERNAME))
+async def handle_manual(event):
+    try:
+        message_text = event.message.message or ""
+        links = extract_links(event.message)
+        if links:
+            message_text += "\n" + "\n".join(links)
+
+        media = event.message.media
+        if isinstance(media, MessageMediaWebPage):
+            media = None
+
+        platform = detect_platform(message_text)
+        category = detect_category(message_text)
+        final_text = format_template(platform, category, message_text)
+
+        await send_to_earnkaro(final_text, media)
+        await event.reply("✅ Sent manually to EarnKaro bot")
+        logger.info(f"Manual message forwarded: Platform={platform}, Category={category}")
+
+    except Exception as e:
+        logger.error(f"❌ Manual Send Error: {e}")
+
+# ------------------ Keep Alive Flask Server ------------------
+app = Flask("")
+
+@app.route("/")
+def home():
+    return "Bot is running."
+
+# ------------------ Main ------------------
+async def main():
+    await client.start()  # Auto-login using session file
+    logger.info("✅ Telegram client started")
+    await client.run_until_disconnected()
+
+if __name__ == "__main__":
+    from threading import Thread
+    Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))).start()
+    asyncio.run(main())
