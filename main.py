@@ -254,6 +254,14 @@ async def main_startup():
 MAIN_LOOP = None
 
 if __name__ == "__main__":
+    # create and set loop
     MAIN_LOOP = asyncio.new_event_loop()
     asyncio.set_event_loop(MAIN_LOOP)
-    Thread(target=lambda
+
+    # start Flask in a separate thread (safe)
+    Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080))), daemon=True).start()
+
+    # start telethon client & tasks on the MAIN_LOOP
+    MAIN_LOOP.create_task(main_startup())
+    logger.info("Starting main event loop")
+    MAIN_LOOP.run_forever()
