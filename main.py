@@ -91,14 +91,11 @@ def resolve_short_link(url):
     except requests.RequestException:
         return url
 
-def detect_platform(text):
-    if not text: return None
-    urls = re.findall(r'https?://\S+', text)
-    full_text_to_check = text
-    if urls:
-        final_url = resolve_short_link(urls[0])
-        full_text_to_check += " " + final_url
-    text_lower = full_text_to_check.lower().replace(" ", "")
+# --- बदलाव 1: इस फंक्शन को सरल बनाया गया ---
+# अब यह सिर्फ दिए गए टेक्स्ट में कीवर्ड्स ढूंढेगा
+def detect_platform(text_to_check):
+    if not text_to_check: return None
+    text_lower = text_to_check.lower().replace(" ", "")
     for platform, keywords in PLATFORM_KEYWORDS.items():
         if any(kw in text_lower for kw in keywords):
             return platform
@@ -109,7 +106,10 @@ def get_ai_generated_details(text):
         logger.warning("⚠️ Gemini AI model not available. Using default details.")
         return "Deal", "✨", "⚡ Amazing deal waiting for you!\n🚀 Hurry, grab it now!", None
 
-    product_info = "\n".join(text.split('\n')[:4])
+    # AI को भेजने से पहले टेक्स्ट को थोड़ा साफ करें
+    product_info_text = re.sub(r'\[.*?\]', '', text).strip() # [Over] जैसे टैग्स हटा दें
+    product_info = "\n".join(product_info_text.split('\n')[:4])
+
     prompt = f"""
     Analyze the following product information from an Indian shopping deal. Your task is to generate a JSON object with four keys: "category", "emoji", "intro_lines", and "hashtags".
     Instructions:
@@ -155,7 +155,6 @@ def format_template(platform, category, emoji, intro_lines, message_text, final_
     template_parts = [header, message_text.strip(), follow_line, final_hashtags]
     return "\n\n".join(filter(None, template_parts))
 
-# --- नया स्मार्ट फंक्शन: लंबे कैप्शन को हैंडल करने के लिए ---
 async def send_smart_message(chat_id, text, media):
     try:
         if media:
@@ -178,11 +177,26 @@ async def process_message(event):
     processed_messages.add(msg_key)
 
     message_text = event.message.message or ""
+    # यह हमारा फाइनल टेक्स्ट होगा जिसे हम भेजेंगे
     cleaned_message_text = clean_incoming_message(message_text)
+    
     media = event.message.media
     if isinstance(media, MessageMediaWebPage): media = None
 
-    platform = detect_platform(cleaned_message_text)
+    # --- बदलाव 2: नया और स्मार्ट लॉजिक ---
+    # प्लेटफॉर्म का पता लगाने के लिए एक अलग टेक्स्ट बनाएंगे
+    text_for_detection = cleaned_message_text
+    urls = re.findall(r'https?://\S+', cleaned_message_text)
+    if urls:
+        resolved_url = resolve_short_link(urls[0])
+        # असली URL को सिर्फ डिटेक्शन के लिए जोड़ेंगे
+        text_for_detection += " " + resolved_url 
+    
+    # अब इस कंबाइंड टेक्स्ट से प्लेटफॉर्म का पता लगाएंगे
+    platform = detect_platform(text_for_detection)
+    # ------------------------------------
+
+    # AI को हम साफ-सुथरा टेक्स्ट ही भेजेंगे
     category, emoji, intro_lines, ai_hashtags = get_ai_generated_details(cleaned_message_text)
     
     final_hashtags = ai_hashtags or TEMPLATES.get(platform, {}).get("hashtags", DEFAULT_HASHTAGS)
@@ -191,6 +205,7 @@ async def process_message(event):
     else:
         logger.warning("⚠️ AI hashtags failed. Using fallback static hashtags.")
 
+    # फाइनल टेम्पलेट बनाने के लिए हम अपना साफ-सुथरा, ओरिजिनल टेक्स्ट ही इस्तेमाल करेंगे
     final_text = format_template(platform, category, emoji, intro_lines, cleaned_message_text, final_hashtags)
     return final_text, media
 
@@ -198,10 +213,8 @@ async def process_message(event):
 async def handle_source(event):
     final_text, media = await process_message(event)
     if final_text:
-        # प्राइवेट ग्रुप को भेजें
         if await send_smart_message(PRIVATE_GROUP_ID, final_text, media):
             logger.info(f"✅ Forwarded message to private group: {PRIVATE_GROUP_ID}")
-        # EarnKaro बॉट को भेजें
         if await send_smart_message(EARNKARO_BOT_USERNAME, final_text, media):
              logger.info("✅ Sent to EarnKaro bot")
 
