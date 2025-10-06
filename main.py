@@ -98,15 +98,16 @@ def detect_category(text):
             return category
     return None
 
-def extract_links(event_message):
-    urls = []
-    if event_message.message:
-        urls.extend(re.findall(r'https?://\S+', event_message.message))
-    if hasattr(event_message, "entities") and event_message.entities:
-        for entity in event_message.entities:
-            if hasattr(entity, "url") and entity.url:
-                urls.append(entity.url)
-    return urls
+# <--- बदलाव: यह फंक्शन अब केवल उन फॉलो लाइनों को हटाएगा जो सोर्स से आती हैं
+def clean_incoming_message(text):
+    """Removes specific unwanted follow lines from the source message."""
+    unwanted_patterns = [
+        r"👉 Follow @lootshoppingxyz for 🔥 daily loot deals!"
+        # भविष्य में आप यहाँ और भी पैटर्न जोड़ सकते हैं
+    ]
+    for pattern in unwanted_patterns:
+        text = re.sub(pattern, '', text)
+    return text.strip()
 
 def format_template(platform, category, message_text):
     follow_line = "👉 Follow @Deallootindia_offical for 🔥 daily loot deals!"     
@@ -135,54 +136,54 @@ async def send_to_earnkaro(message_text, media=None):
         logger.error(f"❌ Failed sending to EarnKaro bot: {e}")
 
 # ------------------ Event Handlers ------------------
-@client.on(events.NewMessage(chats=SOURCE_CHANNEL_USERNAME))
-async def handle_source(event):
+# <--- बदलाव: यह कॉमन फंक्शन दोनों हैंडलर्स के लिए मैसेज प्रोसेस करेगा
+async def process_message(event):
     msg_key = (event.message.chat_id, event.message.id)
     if msg_key in processed_messages:
-        return
+        return None, None
     processed_messages.add(msg_key)
 
+    # स्टेप 1: ओरिजिनल मैसेज टेक्स्ट प्राप्त करें
     message_text = event.message.message or ""
-    links = extract_links(event.message)
-    if links:
-        message_text += "\n" + "\n".join(links)
 
+    # स्टेप 2: केवल सोर्स से आने वाली अवांछित फॉलो लाइन को हटाएँ
+    cleaned_message_text = clean_incoming_message(message_text)
+
+    # स्टेप 3: मीडिया को संभालें
     media = event.message.media
     if isinstance(media, MessageMediaWebPage):
         media = None
 
-    platform = detect_platform(message_text)
-    category = detect_category(message_text)
-    final_text = format_template(platform, category, message_text)
+    # स्टेप 4: प्लेटफॉर्म और कैटेगरी का पता लगाएं
+    platform = detect_platform(cleaned_message_text)
+    category = detect_category(cleaned_message_text)
 
-    try:
-        await client.send_message(PRIVATE_GROUP_ID, final_text)
-        await send_to_earnkaro(final_text, media)
-    except Exception as e:
-        logger.error(f"❌ Auto forward failed: {e}")
+    # स्टेप 5: अपने टेम्प्लेट का उपयोग करके फाइनल टेक्स्ट बनाएं
+    # यहाँ हम 'cleaned_message_text' का उपयोग कर रहे हैं जिसमें न तो डुप्लीकेट लिंक हैं और न ही अवांछित फॉलो लाइन
+    final_text = format_template(platform, category, cleaned_message_text)
+    
+    return final_text, media
+
+@client.on(events.NewMessage(chats=SOURCE_CHANNEL_USERNAME))
+async def handle_source(event):
+    final_text, media = await process_message(event)
+    if final_text:
+        try:
+            await client.send_message(PRIVATE_GROUP_ID, final_text, file=media) # <--- मीडिया को भी प्राइवेट ग्रुप में भेजा
+            await send_to_earnkaro(final_text, media)
+        except Exception as e:
+            logger.error(f"❌ Auto forward failed: {e}")
 
 @client.on(events.NewMessage(chats=PERSONAL_BOT_USERNAME))
 async def handle_manual(event):
-    try:
-        message_text = event.message.message or ""
-        links = extract_links(event.message)
-        if links:
-            message_text += "\n" + "\n".join(links)
-
-        media = event.message.media
-        if isinstance(media, MessageMediaWebPage):
-            media = None
-
-        platform = detect_platform(message_text)
-        category = detect_category(message_text)
-        final_text = format_template(platform, category, message_text)
-
-        await send_to_earnkaro(final_text, media)
-        await event.reply("✅ Sent manually to EarnKaro bot")
-        logger.info(f"Manual message forwarded: Platform={platform}, Category={category}")
-
-    except Exception as e:
-        logger.error(f"❌ Manual Send Error: {e}")
+    final_text, media = await process_message(event)
+    if final_text:
+        try:
+            await send_to_earnkaro(final_text, media)
+            await event.reply("✅ Sent manually to EarnKaro bot")
+            logger.info(f"Manual message forwarded: Platform={detect_platform(final_text)}, Category={detect_category(final_text)}")
+        except Exception as e:
+            logger.error(f"❌ Manual Send Error: {e}")
 
 # ------------------ Keep Alive Flask Server ------------------
 app = Flask("")
@@ -193,7 +194,7 @@ def home():
 
 # ------------------ Main ------------------
 async def main():
-    await client.start()  # Auto-login using session file
+    await client.start()
     logger.info("✅ Telegram client started")
     await client.run_until_disconnected()
 
@@ -201,4 +202,3 @@ if __name__ == "__main__":
     from threading import Thread
     Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))).start()
     asyncio.run(main())
-
