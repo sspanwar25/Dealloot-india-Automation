@@ -10,6 +10,9 @@ from telethon import TelegramClient, events
 from telethon.tl.types import MessageMediaWebPage
 from flask import Flask
 
+# ------------------ Constants ------------------
+MAX_CAPTION = 1024
+
 # ------------------ Logging ------------------
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -55,7 +58,7 @@ if SESSION_BASE64:
         f.write(base64.b64decode(SESSION_BASE64))
     logger.info("✅ final_session.session file created from SESSION_BASE64")
 
-# ------------------ Templates (यह अब Fallback के लिए इस्तेमाल होगा) ------------------
+# ------------------ Templates (Fallback के लिए) ------------------
 TEMPLATES = {
     "amazon": {"hashtags": "#Amazon #LootDeal #DealLootIndia #Deallootindia_offical"},
     "flipkart": {"hashtags": "#Flipkart #LootDeal #DealLootIndia #Deallootindia_offical"},
@@ -76,7 +79,6 @@ PLATFORM_KEYWORDS = {
     "jiomart": ["jiomart.com", "jiomart"]
 }
 
-MAX_CAPTION = 1024
 processed_messages = set()
 client = TelegramClient("final_session", API_ID, API_HASH)
 
@@ -102,39 +104,24 @@ def detect_platform(text):
             return platform
     return None
 
-# --- बदलाव 1: Gemini Prompt को स्मार्ट हैशटैग्स के लिए अपडेट किया गया ---
 def get_ai_generated_details(text):
     if not model:
         logger.warning("⚠️ Gemini AI model not available. Using default details.")
-        return "Deal", "✨", "⚡ Amazing deal waiting for you!\n🚀 Hurry, grab it now!", None # <-- None लौटाएं ताकि fallback चले
+        return "Deal", "✨", "⚡ Amazing deal waiting for you!\n🚀 Hurry, grab it now!", None
 
     product_info = "\n".join(text.split('\n')[:4])
-    
     prompt = f"""
     Analyze the following product information from an Indian shopping deal. Your task is to generate a JSON object with four keys: "category", "emoji", "intro_lines", and "hashtags".
-
     Instructions:
-    1.  "category": Determine the most appropriate single-word category (e.g., Electronics, Fashion, Kitchen).
-    2.  "emoji": Provide a single, suitable emoji that best represents the product.
-    3.  "intro_lines": Create two short, exciting introductory lines for the deal, separated by a newline (\\n).
-    4.  "hashtags": Create a single string of 5-7 relevant hashtags. The hashtags should include the product name, brand, category, and ALWAYS end with "#Deallootindia_offical". Separate them with spaces.
-
-    Example 1:
-    Product: "boAt Airdopes 141, TWS Earbuds with 42H Playtime"
-    Response: {{"category": "Electronics", "emoji": "🎧", "intro_lines": "🎶 Immerse yourself in pure sound!\\n🚀 Grab these top-rated earbuds at a steal!", "hashtags": "#boAtAirdopes #Earbuds #AudioDeal #Electronics #LootDeal #Deallootindia_offical"}}
-
-    Example 2:
-    Product: "Puma Men's Regular Fit T-Shirt, Blue"
-    Response: {{"category": "Fashion", "emoji": "👕", "intro_lines": "🔥 Upgrade your style with this classic Puma tee!\\n🚀 Limited stock, shop now!", "hashtags": "#PumaFashion #MensTshirt #FashionDeal #Puma #MyntraDeals #Deallootindia_offical"}}
-    
-    Product Information:
-    ---
-    {product_info}
-    ---
-
+    1. "category": Determine the most appropriate single-word category (e.g., Electronics, Fashion, Kitchen).
+    2. "emoji": Provide a single, suitable emoji that best represents the product.
+    3. "intro_lines": Create two short, exciting introductory lines for the deal, separated by a newline (\\n).
+    4. "hashtags": Create a single string of 5-7 relevant hashtags. The hashtags should include the product name, brand, category, and ALWAYS end with "#Deallootindia_offical". Separate them with spaces.
+    Product: "boAt Airdopes 141, TWS Earbuds with 42H Playtime" -> {{"category": "Electronics", "emoji": "🎧", "intro_lines": "🎶 Immerse yourself in pure sound!\\n🚀 Grab these top-rated earbuds at a steal!", "hashtags": "#boAtAirdopes #Earbuds #AudioDeal #Electronics #LootDeal #Deallootindia_offical"}}
+    Product: "Puma Men's Regular Fit T-Shirt, Blue" -> {{"category": "Fashion", "emoji": "👕", "intro_lines": "🔥 Upgrade your style with this classic Puma tee!\\n🚀 Limited stock, shop now!", "hashtags": "#PumaFashion #MensTshirt #FashionDeal #Puma #MyntraDeals #Deallootindia_offical"}}
+    Product Information: --- {product_info} ---
     Your JSON Response:
     """
-    
     try:
         response = model.generate_content(prompt)
         match = re.search(r'\{.*\}', response.text, re.DOTALL)
@@ -145,13 +132,12 @@ def get_ai_generated_details(text):
                 result.get("category", "Deal"), 
                 result.get("emoji", "🔥"), 
                 result.get("intro_lines", "⚡ Amazing deal waiting for you!"),
-                result.get("hashtags") # <-- हैशटैग्स को रिटर्न करें (अगर नहीं मिला तो None होगा)
+                result.get("hashtags")
             )
         else:
              raise ValueError("No valid JSON found in the response")
     except Exception as e:
         logger.error(f"❌ Gemini AI Error: {e}")
-        # एरर आने पर None लौटाएं ताकि fallback सिस्टम काम करे
         return "Deal", "✨", "⚡ Amazing deal waiting for you!\n🚀 Hurry, grab it now!", None
 
 def clean_incoming_message(text):
@@ -160,30 +146,30 @@ def clean_incoming_message(text):
     cleaned_text = "\n".join(cleaned_lines)
     return cleaned_text.strip()
 
-# --- बदलाव 2: यह फंक्शन अब डायनामिक हैशटैग्स लेगा ---
 def format_template(platform, category, emoji, intro_lines, message_text, final_hashtags):
     follow_line = "👉 Follow @Deallootindia_offical for 🔥 daily loot deals!"
     platform_name = platform.capitalize() if platform else "Hot"
     category_name = category.capitalize()
-    
     first_line = f"{emoji} {platform_name} {category_name} Deal"
     header = f"{first_line}\n{intro_lines}"
-    
-    # यहाँ डायनामिक हैशटैग्स का उपयोग हो रहा है
     template_parts = [header, message_text.strip(), follow_line, final_hashtags]
     return "\n\n".join(filter(None, template_parts))
 
-async def send_to_earnkaro(message_text, media=None):
+# --- नया स्मार्ट फंक्शन: लंबे कैप्शन को हैंडल करने के लिए ---
+async def send_smart_message(chat_id, text, media):
     try:
         if media:
-            await client.send_file(EARNKARO_BOT_USERNAME, file=media, caption=message_text[:MAX_CAPTION])
-            if len(message_text) > MAX_CAPTION:
-                await client.send_message(EARNKARO_BOT_USERNAME, message_text[MAX_CAPTION:])
+            if len(text) > MAX_CAPTION:
+                await client.send_file(chat_id, file=media, caption=text[:MAX_CAPTION])
+                await client.send_message(chat_id, text[MAX_CAPTION:])
+            else:
+                await client.send_file(chat_id, file=media, caption=text)
         else:
-            await client.send_message(EARNKARO_BOT_USERNAME, message_text)
-        logger.info("✅ Sent to EarnKaro bot")
+            await client.send_message(chat_id, text)
+        return True
     except Exception as e:
-        logger.error(f"❌ Failed sending to EarnKaro bot: {e}")
+        logger.error(f"❌ Failed sending to {chat_id}: {e}")
+        return False
 
 # ------------------ Event Handlers ------------------
 async def process_message(event):
@@ -193,51 +179,40 @@ async def process_message(event):
 
     message_text = event.message.message or ""
     cleaned_message_text = clean_incoming_message(message_text)
-
     media = event.message.media
     if isinstance(media, MessageMediaWebPage): media = None
 
     platform = detect_platform(cleaned_message_text)
-    
-    # AI से जानकारी प्राप्त करें
     category, emoji, intro_lines, ai_hashtags = get_ai_generated_details(cleaned_message_text)
     
-    # --- बदलाव 3: Fallback सिस्टम यहाँ काम करता है ---
-    final_hashtags = None
+    final_hashtags = ai_hashtags or TEMPLATES.get(platform, {}).get("hashtags", DEFAULT_HASHTAGS)
     if ai_hashtags:
-        # अगर AI ने हैशटैग दिए, तो उनका उपयोग करें
-        final_hashtags = ai_hashtags
         logger.info("✅ AI-generated hashtags used.")
     else:
-        # अगर AI फेल हुआ, तो पुराने TEMPLATES से हैशटैग लें
-        final_hashtags = TEMPLATES.get(platform, {}).get("hashtags", DEFAULT_HASHTAGS)
         logger.warning("⚠️ AI hashtags failed. Using fallback static hashtags.")
 
     final_text = format_template(platform, category, emoji, intro_lines, cleaned_message_text, final_hashtags)
-    
     return final_text, media
 
 @client.on(events.NewMessage(chats=SOURCE_CHANNEL_USERNAME))
 async def handle_source(event):
     final_text, media = await process_message(event)
     if final_text:
-        try:
-            await client.send_message(PRIVATE_GROUP_ID, final_text, file=media)
+        # प्राइवेट ग्रुप को भेजें
+        if await send_smart_message(PRIVATE_GROUP_ID, final_text, media):
             logger.info(f"✅ Forwarded message to private group: {PRIVATE_GROUP_ID}")
-            await send_to_earnkaro(final_text, media)
-        except Exception as e:
-            logger.error(f"❌ Auto forward failed: {e}")
+        # EarnKaro बॉट को भेजें
+        if await send_smart_message(EARNKARO_BOT_USERNAME, final_text, media):
+             logger.info("✅ Sent to EarnKaro bot")
 
 @client.on(events.NewMessage(chats=PERSONAL_BOT_USERNAME))
 async def handle_manual(event):
     final_text, media = await process_message(event)
     if final_text:
-        try:
-            await send_to_earnkaro(final_text, media)
+        if await send_smart_message(EARNKARO_BOT_USERNAME, final_text, media):
             await event.reply("✅ Sent manually to EarnKaro bot")
-        except Exception as e:
-            logger.error(f"❌ Manual Send Error: {e}")
-            await event.reply(f"❌ Error: {e}")
+        else:
+            await event.reply(f"❌ Manual Send Error")
 
 # ------------------ Keep Alive Flask Server ------------------
 app = Flask("")
