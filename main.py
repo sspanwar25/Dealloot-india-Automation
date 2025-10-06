@@ -37,35 +37,17 @@ API_ID = int(API_ID)
 PRIVATE_GROUP_ID = int(PRIVATE_GROUP_ID)
 
 # ------------------ Gemini AI कॉन्फ़िगरेशन ------------------
-model = None # पहले मॉडल को None पर सेट करें
+model = None 
 try:
     if not GEMINI_API_KEY:
         logger.error("❌ GEMINI_API_KEY is not set. AI features will be disabled.")
     else:
         genai.configure(api_key=GEMINI_API_KEY)
-        
-        # --- यहाँ नया कोड जोड़ा गया है ---
-        logger.info("🔎 Gemini API कुंजी कॉन्फ़िगर हो गई है। उपलब्ध मॉडलों की सूची जाँची जा रही है...")
-        
-        # उपलब्ध मॉडलों की सूची को लॉग्स में प्रिंट करें
-        logger.info("✅ उपलब्ध मॉडल जो 'generateContent' का समर्थन करते हैं:")
-        available_models = []
-        for m in genai.list_models():
-          if 'generateContent' in m.supported_generation_methods:
-            logger.info(f"   -> {m.name}")
-            available_models.append(m.name)
-        
-        logger.info("-" * 40)
-        # --- नए कोड का अंत ---
-
-        # यह लाइन अभी भी एरर देगी, लेकिन ऊपर दी गई सूची से आपको सही नाम मिल जाएगा
-        logger.info("... अब 'gemini-1.5-flash' मॉडल को इनिशियलाइज़ करने का प्रयास किया जा रहा है ...")
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        logger.info("✅ Gemini AI Model ('gemini-1.5-flash') initialized successfully.")
-
+        model_name = 'models/gemini-2.5-flash'
+        model = genai.GenerativeModel(model_name)
+        logger.info(f"✅ Gemini AI Model ('{model_name}') initialized successfully.")
 except Exception as e:
     logger.error(f"❌ Gemini AI को इनिशियलाइज़ करते समय त्रुटि: {e}")
-    # मॉडल None ही रहेगा, और कोड बिना AI के चलेगा
 
 # ------------------ Session File ------------------
 if SESSION_BASE64:
@@ -73,15 +55,17 @@ if SESSION_BASE64:
         f.write(base64.b64decode(SESSION_BASE64))
     logger.info("✅ final_session.session file created from SESSION_BASE64")
 
-# ------------------ Templates (अब सिर्फ हैशटैग के लिए) ------------------
+# ------------------ Templates (यह अब Fallback के लिए इस्तेमाल होगा) ------------------
 TEMPLATES = {
-    "amazon": {"hashtags": "#Amazon #LootDeal #DealLootIndia"},
-    "flipkart": {"hashtags": "#Flipkart #LootDeal #DealLootIndia"},
-    "myntra": {"hashtags": "#Myntra #StyleDeal #DealLootIndia"},
-    "ajio": {"hashtags": "#Ajio #FashionDeal #DealLootIndia"},
-    "meesho": {"hashtags": "#Meesho #BudgetDeal #DealLootIndia"},
-    "jiomart": {"hashtags": "#JioMart #LootDeal #DealLootIndia"}
+    "amazon": {"hashtags": "#Amazon #LootDeal #DealLootIndia #Deallootindia_offical"},
+    "flipkart": {"hashtags": "#Flipkart #LootDeal #DealLootIndia #Deallootindia_offical"},
+    "myntra": {"hashtags": "#Myntra #StyleDeal #DealLootIndia #Deallootindia_offical"},
+    "ajio": {"hashtags": "#Ajio #FashionDeal #DealLootIndia #Deallootindia_offical"},
+    "meesho": {"hashtags": "#Meesho #BudgetDeal #DealLootIndia #Deallootindia_offical"},
+    "jiomart": {"hashtags": "#JioMart #LootDeal #DealLootIndia #Deallootindia_offical"}
 }
+DEFAULT_HASHTAGS = "#DealLootIndia #LootDeal #OnlineShopping #Deallootindia_offical"
+
 
 PLATFORM_KEYWORDS = {
     "amazon": ["amazon.in", "amzn.to", "amazon", "amzn", "amazn"],
@@ -118,28 +102,30 @@ def detect_platform(text):
             return platform
     return None
 
+# --- बदलाव 1: Gemini Prompt को स्मार्ट हैशटैग्स के लिए अपडेट किया गया ---
 def get_ai_generated_details(text):
     if not model:
         logger.warning("⚠️ Gemini AI model not available. Using default details.")
-        return "Deal", "✨", "⚡ Amazing deal waiting for you!\n🚀 Hurry, grab it now!"
+        return "Deal", "✨", "⚡ Amazing deal waiting for you!\n🚀 Hurry, grab it now!", None # <-- None लौटाएं ताकि fallback चले
 
     product_info = "\n".join(text.split('\n')[:4])
     
     prompt = f"""
-    Analyze the following product information from an Indian shopping deal. Your task is to generate a JSON object with three keys: "category", "emoji", and "intro_lines".
+    Analyze the following product information from an Indian shopping deal. Your task is to generate a JSON object with four keys: "category", "emoji", "intro_lines", and "hashtags".
 
     Instructions:
-    1.  "category": Determine the most appropriate single-word category (e.g., Electronics, Fashion, Kitchen, Beauty, Home).
+    1.  "category": Determine the most appropriate single-word category (e.g., Electronics, Fashion, Kitchen).
     2.  "emoji": Provide a single, suitable emoji that best represents the product.
-    3.  "intro_lines": Create two short, exciting, and creative introductory lines for the deal, separated by a newline character (\\n).
+    3.  "intro_lines": Create two short, exciting introductory lines for the deal, separated by a newline (\\n).
+    4.  "hashtags": Create a single string of 5-7 relevant hashtags. The hashtags should include the product name, brand, category, and ALWAYS end with "#Deallootindia_offical". Separate them with spaces.
 
     Example 1:
     Product: "boAt Airdopes 141, TWS Earbuds with 42H Playtime"
-    Response: {{"category": "Electronics", "emoji": "🎧", "intro_lines": "🎶 Immerse yourself in pure sound!\\n🚀 Grab these top-rated earbuds at a steal!"}}
+    Response: {{"category": "Electronics", "emoji": "🎧", "intro_lines": "🎶 Immerse yourself in pure sound!\\n🚀 Grab these top-rated earbuds at a steal!", "hashtags": "#boAtAirdopes #Earbuds #AudioDeal #Electronics #LootDeal #Deallootindia_offical"}}
 
     Example 2:
-    Product: "Puma Men's Regular Fit T-Shirt"
-    Response: {{"category": "Fashion", "emoji": "👕", "intro_lines": "🔥 Upgrade your style with this classic Puma tee!\\n🚀 Limited stock, shop now!"}}
+    Product: "Puma Men's Regular Fit T-Shirt, Blue"
+    Response: {{"category": "Fashion", "emoji": "👕", "intro_lines": "🔥 Upgrade your style with this classic Puma tee!\\n🚀 Limited stock, shop now!", "hashtags": "#PumaFashion #MensTshirt #FashionDeal #Puma #MyntraDeals #Deallootindia_offical"}}
     
     Product Information:
     ---
@@ -155,29 +141,36 @@ def get_ai_generated_details(text):
         if match:
             json_text = match.group(0)
             result = json.loads(json_text)
-            return result.get("category", "Deal"), result.get("emoji", "🔥"), result.get("intro_lines", "⚡ Amazing deal waiting for you!")
+            return (
+                result.get("category", "Deal"), 
+                result.get("emoji", "🔥"), 
+                result.get("intro_lines", "⚡ Amazing deal waiting for you!"),
+                result.get("hashtags") # <-- हैशटैग्स को रिटर्न करें (अगर नहीं मिला तो None होगा)
+            )
         else:
              raise ValueError("No valid JSON found in the response")
     except Exception as e:
         logger.error(f"❌ Gemini AI Error: {e}")
-        return "Deal", "✨", "⚡ Amazing deal waiting for you!\n🚀 Hurry, grab it now!"
+        # एरर आने पर None लौटाएं ताकि fallback सिस्टम काम करे
+        return "Deal", "✨", "⚡ Amazing deal waiting for you!\n🚀 Hurry, grab it now!", None
 
 def clean_incoming_message(text):
-    unwanted_patterns = [r"👉 Follow @\w+ for 🔥 daily loot deals!"]
-    for pattern in unwanted_patterns:
-        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
-    return text.strip()
+    lines = text.split('\n')
+    cleaned_lines = [line for line in lines if "@lootshoppingxyz" not in line]
+    cleaned_text = "\n".join(cleaned_lines)
+    return cleaned_text.strip()
 
-def format_template(platform, category, emoji, intro_lines, message_text):
+# --- बदलाव 2: यह फंक्शन अब डायनामिक हैशटैग्स लेगा ---
+def format_template(platform, category, emoji, intro_lines, message_text, final_hashtags):
     follow_line = "👉 Follow @Deallootindia_offical for 🔥 daily loot deals!"
     platform_name = platform.capitalize() if platform else "Hot"
     category_name = category.capitalize()
     
     first_line = f"{emoji} {platform_name} {category_name} Deal"
-    hashtags = TEMPLATES.get(platform, {}).get("hashtags", "#DealLootIndia #LootDeal")
-
     header = f"{first_line}\n{intro_lines}"
-    template_parts = [header, message_text.strip(), follow_line, hashtags]
+    
+    # यहाँ डायनामिक हैशटैग्स का उपयोग हो रहा है
+    template_parts = [header, message_text.strip(), follow_line, final_hashtags]
     return "\n\n".join(filter(None, template_parts))
 
 async def send_to_earnkaro(message_text, media=None):
@@ -205,9 +198,22 @@ async def process_message(event):
     if isinstance(media, MessageMediaWebPage): media = None
 
     platform = detect_platform(cleaned_message_text)
-    category, emoji, intro_lines = get_ai_generated_details(cleaned_message_text)
     
-    final_text = format_template(platform, category, emoji, intro_lines, cleaned_message_text)
+    # AI से जानकारी प्राप्त करें
+    category, emoji, intro_lines, ai_hashtags = get_ai_generated_details(cleaned_message_text)
+    
+    # --- बदलाव 3: Fallback सिस्टम यहाँ काम करता है ---
+    final_hashtags = None
+    if ai_hashtags:
+        # अगर AI ने हैशटैग दिए, तो उनका उपयोग करें
+        final_hashtags = ai_hashtags
+        logger.info("✅ AI-generated hashtags used.")
+    else:
+        # अगर AI फेल हुआ, तो पुराने TEMPLATES से हैशटैग लें
+        final_hashtags = TEMPLATES.get(platform, {}).get("hashtags", DEFAULT_HASHTAGS)
+        logger.warning("⚠️ AI hashtags failed. Using fallback static hashtags.")
+
+    final_text = format_template(platform, category, emoji, intro_lines, cleaned_message_text, final_hashtags)
     
     return final_text, media
 
