@@ -37,13 +37,19 @@ API_ID = int(API_ID)
 PRIVATE_GROUP_ID = int(PRIVATE_GROUP_ID)
 
 # ------------------ Gemini AI कॉन्फ़िगरेशन ------------------
+model = None # पहले मॉडल को None पर सेट करें
 try:
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-pro')
-    logger.info("✅ Gemini AI Model initialized successfully.")
+    if not GEMINI_API_KEY:
+        logger.error("❌ GEMINI_API_KEY is not set. AI features will be disabled.")
+    else:
+        genai.configure(api_key=GEMINI_API_KEY)
+        # <-- FIX: 'gemini-pro' को नवीनतम मॉडल 'gemini-1.5-flash' से बदला गया है।
+        # यह तेज़, कुशल और समर्थित है।
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        logger.info("✅ Gemini AI Model ('gemini-1.5-flash') initialized successfully.")
 except Exception as e:
     logger.error(f"❌ Failed to initialize Gemini AI: {e}")
-    model = None
+    # मॉडल None ही रहेगा, और कोड बिना AI के चलेगा
 
 # ------------------ Session File ------------------
 if SESSION_BASE64:
@@ -98,7 +104,9 @@ def detect_platform(text):
 
 # <-- AI फंक्शन, अब इंट्रो लाइन भी बनाएगा
 def get_ai_generated_details(text):
+    # अगर मॉडल इनिशियलाइज़ नहीं हुआ है, तो डिफ़ॉल्ट वैल्यू लौटाएं
     if not model:
+        logger.warning("⚠️ Gemini AI model not available. Using default details.")
         return "Deal", "✨", "⚡ Amazing deal waiting for you!\n🚀 Hurry, grab it now!"
 
     product_info = "\n".join(text.split('\n')[:4])
@@ -129,17 +137,23 @@ def get_ai_generated_details(text):
     
     try:
         response = model.generate_content(prompt)
-        json_text = response.text.strip().replace("```json", "").replace("```", "")
-        result = json.loads(json_text)
-        return result.get("category", "Deal"), result.get("emoji", "🔥"), result.get("intro_lines", "⚡ Amazing deal waiting for you!")
+        # प्रतिक्रिया में से JSON को सुरक्षित रूप से निकालने के लिए Regex का उपयोग करें
+        match = re.search(r'\{.*\}', response.text, re.DOTALL)
+        if match:
+            json_text = match.group(0)
+            result = json.loads(json_text)
+            return result.get("category", "Deal"), result.get("emoji", "🔥"), result.get("intro_lines", "⚡ Amazing deal waiting for you!")
+        else:
+             raise ValueError("No valid JSON found in the response")
     except Exception as e:
         logger.error(f"❌ Gemini AI Error: {e}")
         return "Deal", "✨", "⚡ Amazing deal waiting for you!\n🚀 Hurry, grab it now!"
 
 def clean_incoming_message(text):
-    unwanted_patterns = [r"👉 Follow @lootshoppingxyz for 🔥 daily loot deals!"]
+    # आप यहां और भी पैटर्न जोड़ सकते हैं जिन्हें हटाना है
+    unwanted_patterns = [r"👉 Follow @\w+ for 🔥 daily loot deals!"]
     for pattern in unwanted_patterns:
-        text = re.sub(pattern, '', text)
+        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
     return text.strip()
 
 # <-- अपडेटेड टेम्प्लेट फंक्शन, अब AI से मिली जानकारी का उपयोग करेगा
@@ -159,6 +173,7 @@ async def send_to_earnkaro(message_text, media=None):
     try:
         if media:
             await client.send_file(EARNKARO_BOT_USERNAME, file=media, caption=message_text[:MAX_CAPTION])
+            # अगर कैप्शन बहुत लंबा है तो बाकी का हिस्सा अलग मैसेज में भेजें
             if len(message_text) > MAX_CAPTION:
                 await client.send_message(EARNKARO_BOT_USERNAME, message_text[MAX_CAPTION:])
         else:
@@ -191,7 +206,9 @@ async def handle_source(event):
     final_text, media = await process_message(event)
     if final_text:
         try:
+            # प्राइवेट ग्रुप और Earnkaro बॉट दोनों को भेजें
             await client.send_message(PRIVATE_GROUP_ID, final_text, file=media)
+            logger.info(f"✅ Forwarded message to private group: {PRIVATE_GROUP_ID}")
             await send_to_earnkaro(final_text, media)
         except Exception as e:
             logger.error(f"❌ Auto forward failed: {e}")
@@ -205,20 +222,29 @@ async def handle_manual(event):
             await event.reply("✅ Sent manually to EarnKaro bot")
         except Exception as e:
             logger.error(f"❌ Manual Send Error: {e}")
+            await event.reply(f"❌ Error: {e}")
 
 # ------------------ Keep Alive Flask Server ------------------
 app = Flask("")
 @app.route("/")
 def home():
-    return "Bot is running."
+    return "Bot is alive and running!"
 
 # ------------------ Main ------------------
 async def main():
     await client.start()
-    logger.info("✅ Telegram client started")
+    logger.info("✅ Telegram client started and bot is ready!")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
     from threading import Thread
-    Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))).start()
-    asyncio.run(main())
+    # Flask सर्वर को एक अलग थ्रेड में चलाएं
+    flask_thread = Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080))))
+    flask_thread.daemon = True
+    flask_thread.start()
+    
+    # मुख्य asyncio लूप चलाएं
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Bot stopped manually.")
