@@ -25,7 +25,7 @@ EARNKARO_BOT_USERNAME = os.getenv("EARNKARO_BOT_USERNAME")
 PERSONAL_BOT_USERNAME = os.getenv("PERSONAL_BOT_USERNAME")
 SOURCE_CHANNEL_USERNAME = os.getenv("SOURCE_CHANNEL_USERNAME")
 SESSION_BASE64 = os.getenv("SESSION_BASE64")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") # <-- यह बहुत ज़रूरी है
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Validate required variables
 required_vars = [API_ID, API_HASH, PRIVATE_GROUP_ID, EARNKARO_BOT_USERNAME, PERSONAL_BOT_USERNAME, SOURCE_CHANNEL_USERNAME, GEMINI_API_KEY]
@@ -43,12 +43,28 @@ try:
         logger.error("❌ GEMINI_API_KEY is not set. AI features will be disabled.")
     else:
         genai.configure(api_key=GEMINI_API_KEY)
-        # <-- FIX: 'gemini-pro' को नवीनतम मॉडल 'gemini-1.5-flash' से बदला गया है।
-        # यह तेज़, कुशल और समर्थित है।
+        
+        # --- यहाँ नया कोड जोड़ा गया है ---
+        logger.info("🔎 Gemini API कुंजी कॉन्फ़िगर हो गई है। उपलब्ध मॉडलों की सूची जाँची जा रही है...")
+        
+        # उपलब्ध मॉडलों की सूची को लॉग्स में प्रिंट करें
+        logger.info("✅ उपलब्ध मॉडल जो 'generateContent' का समर्थन करते हैं:")
+        available_models = []
+        for m in genai.list_models():
+          if 'generateContent' in m.supported_generation_methods:
+            logger.info(f"   -> {m.name}")
+            available_models.append(m.name)
+        
+        logger.info("-" * 40)
+        # --- नए कोड का अंत ---
+
+        # यह लाइन अभी भी एरर देगी, लेकिन ऊपर दी गई सूची से आपको सही नाम मिल जाएगा
+        logger.info("... अब 'gemini-1.5-flash' मॉडल को इनिशियलाइज़ करने का प्रयास किया जा रहा है ...")
         model = genai.GenerativeModel('gemini-1.5-flash')
         logger.info("✅ Gemini AI Model ('gemini-1.5-flash') initialized successfully.")
+
 except Exception as e:
-    logger.error(f"❌ Failed to initialize Gemini AI: {e}")
+    logger.error(f"❌ Gemini AI को इनिशियलाइज़ करते समय त्रुटि: {e}")
     # मॉडल None ही रहेगा, और कोड बिना AI के चलेगा
 
 # ------------------ Session File ------------------
@@ -102,9 +118,7 @@ def detect_platform(text):
             return platform
     return None
 
-# <-- AI फंक्शन, अब इंट्रो लाइन भी बनाएगा
 def get_ai_generated_details(text):
-    # अगर मॉडल इनिशियलाइज़ नहीं हुआ है, तो डिफ़ॉल्ट वैल्यू लौटाएं
     if not model:
         logger.warning("⚠️ Gemini AI model not available. Using default details.")
         return "Deal", "✨", "⚡ Amazing deal waiting for you!\n🚀 Hurry, grab it now!"
@@ -137,7 +151,6 @@ def get_ai_generated_details(text):
     
     try:
         response = model.generate_content(prompt)
-        # प्रतिक्रिया में से JSON को सुरक्षित रूप से निकालने के लिए Regex का उपयोग करें
         match = re.search(r'\{.*\}', response.text, re.DOTALL)
         if match:
             json_text = match.group(0)
@@ -150,13 +163,11 @@ def get_ai_generated_details(text):
         return "Deal", "✨", "⚡ Amazing deal waiting for you!\n🚀 Hurry, grab it now!"
 
 def clean_incoming_message(text):
-    # आप यहां और भी पैटर्न जोड़ सकते हैं जिन्हें हटाना है
     unwanted_patterns = [r"👉 Follow @\w+ for 🔥 daily loot deals!"]
     for pattern in unwanted_patterns:
         text = re.sub(pattern, '', text, flags=re.IGNORECASE)
     return text.strip()
 
-# <-- अपडेटेड टेम्प्लेट फंक्शन, अब AI से मिली जानकारी का उपयोग करेगा
 def format_template(platform, category, emoji, intro_lines, message_text):
     follow_line = "👉 Follow @Deallootindia_offical for 🔥 daily loot deals!"
     platform_name = platform.capitalize() if platform else "Hot"
@@ -173,7 +184,6 @@ async def send_to_earnkaro(message_text, media=None):
     try:
         if media:
             await client.send_file(EARNKARO_BOT_USERNAME, file=media, caption=message_text[:MAX_CAPTION])
-            # अगर कैप्शन बहुत लंबा है तो बाकी का हिस्सा अलग मैसेज में भेजें
             if len(message_text) > MAX_CAPTION:
                 await client.send_message(EARNKARO_BOT_USERNAME, message_text[MAX_CAPTION:])
         else:
@@ -206,7 +216,6 @@ async def handle_source(event):
     final_text, media = await process_message(event)
     if final_text:
         try:
-            # प्राइवेट ग्रुप और Earnkaro बॉट दोनों को भेजें
             await client.send_message(PRIVATE_GROUP_ID, final_text, file=media)
             logger.info(f"✅ Forwarded message to private group: {PRIVATE_GROUP_ID}")
             await send_to_earnkaro(final_text, media)
@@ -238,12 +247,10 @@ async def main():
 
 if __name__ == "__main__":
     from threading import Thread
-    # Flask सर्वर को एक अलग थ्रेड में चलाएं
     flask_thread = Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080))))
     flask_thread.daemon = True
     flask_thread.start()
     
-    # मुख्य asyncio लूप चलाएं
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
