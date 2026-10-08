@@ -1,0 +1,14 @@
+name: Keep Render Alive
+
+on:
+  schedule:
+    # Har 10 minute mein Render ko ping karega
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render App
+        run: curl -s https://dealloot-india-automation.onrender.com > /dev/null
